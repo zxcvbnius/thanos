@@ -113,7 +113,9 @@ Flags:
                                  related server will be started.
       --label=<name>="<value>" ...  
                                  Labels to be applied to all generated metrics
-                                 (repeated).
+                                 (repeated). Similar to external labels for
+                                 Prometheus, used to identify ruler and its
+                                 blocks as unique source.
       --data-dir="data/"         data directory
       --rule-file=rules/ ...     Rule files that should be used by rule manager.
                                  Can be in glob format (repeated).
@@ -127,6 +129,11 @@ Flags:
                                  DNS lookups. The port defaults to 9093 or the
                                  SRV record's value. The URL path is used as a
                                  prefix for the regular Alertmanager API path.
+      --alertmanagers.label-drop=ALERTMANAGERS.LABEL-DROP ...  
+                                 Labels by name to drop before sending to
+                                 alertmanager. This allows alert to be
+                                 deduplicated on replica label (repeated).
+                                 Similar Prometheus alert relabelling
       --alert.query-url=ALERT.QUERY-URL  
                                  The external Thanos Query URL that would be set
                                  in all alerts 'Source' field

@@ -78,10 +78,11 @@ func (a *Alert) ResolvedAt(ts time.Time) bool {
 // Queue is a queue of alert notifications waiting to be sent. The queue is consumed in batches
 // and entries are dropped at the front if it runs full.
 type Queue struct {
-	logger       log.Logger
-	maxBatchSize int
-	capacity     int
-	labels       labels.Labels
+	logger        log.Logger
+	maxBatchSize  int
+	capacity      int
+	labels        labels.Labels
+	excludeLabels labels.Labels
 
 	mtx   sync.Mutex
 	queue []*Alert
@@ -93,16 +94,18 @@ type Queue struct {
 }
 
 // NewQueue returns a new queue. The given label set is attached to all alerts pushed to the queue.
-func NewQueue(logger log.Logger, reg prometheus.Registerer, capacity, maxBatchSize int, lset labels.Labels) *Queue {
+// The given exclude label set tells what label names to drop (including labels to add).
+func NewQueue(logger log.Logger, reg prometheus.Registerer, capacity, maxBatchSize int, lset labels.Labels, excludeLset labels.Labels) *Queue {
 	if logger == nil {
 		logger = log.NewNopLogger()
 	}
 	q := &Queue{
-		logger:       logger,
-		capacity:     capacity,
-		morec:        make(chan struct{}, 1),
-		maxBatchSize: maxBatchSize,
-		labels:       lset,
+		logger:        logger,
+		capacity:      capacity,
+		morec:         make(chan struct{}, 1),
+		maxBatchSize:  maxBatchSize,
+		labels:        lset,
+		excludeLabels: excludeLset,
 
 		dropped: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "thanos_alert_queue_alerts_dropped_total",
@@ -179,10 +182,21 @@ func (q *Queue) Push(alerts []*Alert) {
 
 	q.pushed.Add(float64(len(alerts)))
 
-	// Attach external labels before relabelling and sending.
+	// Attach external labels and exclude drop labels before sending.
+	// TODO(bwplotka): User proper relabelling with https://github.com/improbable-eng/thanos/issues/660
 	for _, a := range alerts {
-		lb := labels.NewBuilder(a.Labels)
+		lb := labels.NewBuilder(labels.Labels{})
+		for _, l := range a.Labels {
+			if q.excludeLabels.Has(l.Name) {
+				continue
+			}
+			lb.Set(l.Name, l.Value)
+		}
+
 		for _, l := range q.labels {
+			if q.excludeLabels.Has(l.Name) {
+				continue
+			}
 			lb.Set(l.Name, l.Value)
 		}
 		a.Labels = lb.Labels()

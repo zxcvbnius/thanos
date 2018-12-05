@@ -57,7 +57,7 @@ func registerRule(m map[string]setupFunc, app *kingpin.Application, name string)
 
 	grpcBindAddr, httpBindAddr, cert, key, clientCA, newPeerFn := regCommonServerFlags(cmd)
 
-	labelStrs := cmd.Flag("label", "Labels to be applied to all generated metrics (repeated).").
+	labelStrs := cmd.Flag("label", "Labels to be applied to all generated metrics (repeated). Similar to external labels for Prometheus, used to identify ruler and its blocks as unique source.").
 		PlaceHolder("<name>=\"<value>\"").Strings()
 
 	dataDir := cmd.Flag("data-dir", "data directory").Default("data/").String()
@@ -73,6 +73,9 @@ func registerRule(m map[string]setupFunc, app *kingpin.Application, name string)
 		Default("48h"))
 
 	alertmgrs := cmd.Flag("alertmanagers.url", "Alertmanager URLs to push firing alerts to. The scheme may be prefixed with 'dns+' or 'dnssrv+' to detect Alertmanager IPs through respective DNS lookups. The port defaults to 9093 or the SRV record's value. The URL path is used as a prefix for the regular Alertmanager API path.").
+		Strings()
+
+	alertmgrsExcludeLabels := cmd.Flag("alertmanagers.label-drop", "Labels by name to drop before sending to alertmanager. This allows alert to be deduplicated on replica label (repeated). Similar Prometheus alert relabelling").
 		Strings()
 
 	alertQueryURL := cmd.Flag("alert.query-url", "The external Thanos Query URL that would be set in all alerts 'Source' field").String()
@@ -137,6 +140,7 @@ func registerRule(m map[string]setupFunc, app *kingpin.Application, name string)
 			tracer,
 			lset,
 			*alertmgrs,
+			*alertmgrsExcludeLabels,
 			*grpcBindAddr,
 			*cert,
 			*key,
@@ -166,6 +170,7 @@ func runRule(
 	tracer opentracing.Tracer,
 	lset labels.Labels,
 	alertmgrURLs []string,
+	alertmgrsExcludeLabels []string,
 	grpcBindAddr string,
 	cert string,
 	key string,
@@ -276,9 +281,15 @@ func runRule(
 	}
 
 	// Run rule evaluation and alert notifications.
+
+	var excludeLabels promlabels.Labels
+	for _, ln := range alertmgrsExcludeLabels {
+		excludeLabels = append(excludeLabels, promlabels.Label{Name: ln})
+	}
+
 	var (
 		alertmgrs = newAlertmanagerSet(alertmgrURLs, nil)
-		alertQ    = alert.NewQueue(logger, reg, 10000, 100, labelsTSDBToProm(lset))
+		alertQ    = alert.NewQueue(logger, reg, 10000, 100, labelsTSDBToProm(lset), excludeLabels)
 		mgr       *rules.Manager
 	)
 	{
